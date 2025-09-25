@@ -28,7 +28,7 @@ MODEL_FILE = "modelo_letras.pth"
 PREDICTION_COOLDOWN = 1.0
 IMAGE_SIZE = 350  # Tamaño de las imágenes procesadas
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"[INFO] PyTorch usando: {device}")
 if torch.cuda.is_available():
     print(f"[INFO] GPU: {torch.cuda.get_device_name(0)}, Memoria: {torch.cuda.get_device_properties(0).total_memory/1024**3:.2f} GB")

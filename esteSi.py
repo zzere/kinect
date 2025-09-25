@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-Kinect + MediaPipe + PyTorch (CUDA) con POO
-Actualizado: Guardado en carpeta 'prueba', imágenes 350x350
-Modo 1 (Predicción) ahora es el predeterminado.
+Kinect + MediaPipe + PyTorch (CUDA) con POO + GUI
+- Guardado en carpeta 'prueba', imágenes 350x350
+- Gestos:
+  - Pulgar hacia interior: borrar canvas
+  - Pulgar 2s: borrar última letra
+  - Pulgar + meñique: predecir letra
+  - Índice + medio: guardar predicciones, generar MP3 y salir
+  - Solo meñique: cambiar color línea
+- Botones: dibujar, borrar, color, guardar
+- Feedback visual y hover de 2s para activar botones
 """
 
 import sys, os, time, math, datetime, string
@@ -11,9 +18,9 @@ import numpy as np
 import mediapipe as mp
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torchvision import transforms, models
 from PIL import Image
+from elevenlabs import ElevenLabs, save
 
 try:
     import freenect
@@ -26,38 +33,32 @@ except Exception:
 # -----------------------------
 WIDTH, HEIGHT = 640, 480
 SAVE_COOLDOWN = 2
-DATASET_DIR = "prueba"  # Carpeta principal para guardar imágenes
+DATASET_DIR = "prueba"
 MODEL_FILE = "modelo_letras.pth"
-PREDICTION_COOLDOWN = 1.0  # 1 segundo entre predicciones
-IMAGE_SIZE = 350  # Tamaño de las imágenes procesadas
-SHAKE_THRESHOLD = 100  # Umbral de movimiento para detectar agitado
+PREDICTION_COOLDOWN = 1.0
+IMAGE_SIZE = 350
+GESTURE_HOLD_TIME = 1.0
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"[INFO] PyTorch usando: {device}")
-if torch.cuda.is_available():
-    print(f"[INFO] GPU: {torch.cuda.get_device_name(0)}, Memoria: {torch.cuda.get_device_properties(0).total_memory/1024**3:.2f} GB")
+device = "cpu"
 
-# -----------------------------
-# Transformaciones para el modelo ResNet
-# ------------------------------
+# Transformaciones para ResNet
 transform = transforms.Compose([
-    transforms.Grayscale(num_output_channels=3),  # Convierte B/N a 3 canales para ResNet
+    transforms.Grayscale(num_output_channels=3),
     transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5])
 ])
 
 # -----------------------------
-# Clase principal del sistema
+# Clase principal
 # -----------------------------
 class KinectHandSystem:
-    def __init__(self):
+    def __init__(self, elevenlabs_api_key=None):
         # MediaPipe
         self.mp_hands = mp.solutions.hands
-        self.mp_drawing = mp.solutions.drawing_utils
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=1,  # Solo una mano ahora
+            max_num_hands=1,
             min_detection_confidence=0.6,
             min_tracking_confidence=0.5
         )
@@ -70,20 +71,38 @@ class KinectHandSystem:
         self.estado = "Dibujo OFF"
         self.mensaje_superior = ""
         self.last_save_time = 0
-        self.last_prediction_time = 0  # Tiempo de la última predicción
+        self.last_prediction_time = 0
         self.predicciones = []
-        self.modo = 1  # ✅ default predicción
+        self.modo = 1
         self.model = None
-        self.letters = []  # Lista de letras para mapeo
-        self.shake_start_time = 0  # Tiempo de inicio del agitado
-        self.shake_detected = False  # Si se detectó agitado
+        self.letters = []
 
-        # ✅ Si arranca en modo predicción, carga el modelo de inmediato
+        # Gestos
+        self.gesto_borrar_letra_start = None
+        self.feedback_gesto = ""
+        self.button_hover_start = None
+        self.gesto_guardar_predicciones_start = None
+        self.line_color = (0,255,0)  # Verde inicial
+
+        # Imagenes guardadas
+        self.saved_images = []
+
+        # ElevenLabs
+        self.client = ElevenLabs(api_key=elevenlabs_api_key) if elevenlabs_api_key else None
+
+        # Botones GUI
+        self.buttons = {
+            "dibujar": (10,400,110,440,"Dibujar"),
+            "borrar": (120,400,220,440,"Borrar"),
+            "color": (230,400,330,440,"Color"),
+            "guardar": (340,400,460,440,"Guardar")
+        }
+
         if self.modo == 1:
             self.cargar_modelo()
 
     # -------------------------
-    # Kinect
+    # Kinect frame
     # -------------------------
     def kinect_rgb_frame(self):
         try:
@@ -96,7 +115,7 @@ class KinectHandSystem:
             return None
 
     # -------------------------
-    # Procesamiento de dibujo
+    # Procesar dibujo
     # -------------------------
     @staticmethod
     def procesar_dibujo(canvas):
@@ -113,45 +132,24 @@ class KinectHandSystem:
     def fingers_up(hand_landmarks):
         lm = hand_landmarks.landmark
         return [
-            1 if lm[4].x < lm[3].x else 0,
-            1 if lm[8].y < lm[6].y else 0,
-            1 if lm[12].y < lm[10].y else 0,
-            1 if lm[16].y < lm[14].y else 0,
-            1 if lm[20].y < lm[18].y else 0
+            1 if lm[4].x < lm[3].x else 0,    # pulgar
+            1 if lm[8].y < lm[6].y else 0,    # índice
+            1 if lm[12].y < lm[10].y else 0,  # medio
+            1 if lm[16].y < lm[14].y else 0,  # anular
+            1 if lm[20].y < lm[18].y else 0   # meñique
         ]
 
     # -------------------------
-    # Detectar mano cerrada (todos los dedos abajo)
+    # Gestos
     # -------------------------
-    @staticmethod
-    def mano_cerrada(hand_landmarks):
-        lm = hand_landmarks.landmark
-        return all([
-            lm[4].x > lm[3].x,
-            lm[8].y > lm[6].y,
-            lm[12].y > lm[10].y,
-            lm[16].y > lm[14].y,
-            lm[20].y > lm[18].y
-        ])
+    def gesto_borrar_ultima_letra(self, fingers):
+        return fingers == [1,0,0,0,0]
 
-    # -------------------------
-    # Detectar agitado de mano
-    # -------------------------
-    def detectar_agitado(self, current_palm):
-        if self.prev_palm is None:
-            self.prev_palm = current_palm
-            return False
-        dx = current_palm[0] - self.prev_palm[0]
-        dy = current_palm[1] - self.prev_palm[1]
-        distance = math.sqrt(dx*dx + dy*dy)
-        if distance > SHAKE_THRESHOLD:
-            if not self.shake_detected:
-                self.shake_start_time = time.time()
-                self.shake_detected = True
-                return True
-        else:
-            self.shake_detected = False
-        return False
+    def gesto_predecir(self, fingers):
+        return fingers == [1,0,0,0,1]
+
+    def gesto_guardar_predicciones(self, fingers):
+        return fingers == [0,1,1,0,0]
 
     # -------------------------
     # Borrar canvas
@@ -162,56 +160,66 @@ class KinectHandSystem:
         print("[INFO] Canvas borrado")
 
     # -------------------------
-    # Guardar dibujo en carpeta prueba
+    # Guardar predicciones en txt y generar MP3
     # -------------------------
-    def guardar_dibujo_dataset(self):
-        if not self.selected_letter: return
-        if time.time() - self.last_save_time < SAVE_COOLDOWN: return
+    def guardar_predicciones_txt(self):
+        if not self.predicciones:
+            print("[INFO] No hay predicciones para guardar.")
+            return
+        os.makedirs("resultados", exist_ok=True)
+        filename = os.path.join("predicciones.txt")
+        with open(filename, "w") as f:
+            f.write("".join(self.predicciones))
+        print(f"[OK] Predicciones guardadas en {filename}")
+        self.mensaje_superior = f"Guardado en {filename}"
 
-        proc = self.procesar_dibujo(self.canvas)
-        final_img = np.full_like(proc, 255)
-        final_img[proc==0] = 0
+        # Generar MP3 si client está definido
+        if self.client:
+            self.txt_a_mp3_elevenlabs(filename, "predicciones.mp3")
 
-        letter_dir = os.path.join(DATASET_DIR, self.selected_letter)
-        os.makedirs(letter_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(letter_dir, f"dibujo_{timestamp}.png")
-        cv2.imwrite(filename, final_img)
-        print(f"[OK] Imagen guardada: {filename}")
-        self.last_save_time = time.time()
+        # Guardar imagen final combinando todas las imágenes
+        if self.saved_images:
+            imgs = [Image.fromarray(img) for img in self.saved_images]
+            widths, heights = zip(*(i.size for i in imgs))
+            total_width = sum(widths)
+            max_height = max(heights)
+            new_im = Image.new('RGB', (total_width, max_height))
+            x_offset = 0
+            for im in imgs:
+                new_im.paste(im, (x_offset,0))
+                x_offset += im.width
+            new_im.save("imagen_final.png")
+            print("[INFO] Imagen final creada: imagen_final.png")
+
+        self.predicciones = []
 
     # -------------------------
-    # Cargar modelo ResNet
+    # Cargar modelo
     # -------------------------
     def cargar_modelo(self):
         try:
             if os.path.exists("Dataset"):
                 self.letters = sorted([f for f in os.listdir("Dataset") 
-                                     if os.path.isdir(os.path.join("Dataset", f))])
+                                       if os.path.isdir(os.path.join("Dataset", f))])
             else:
                 self.letters = list(string.ascii_lowercase)
-            
             print(f"[INFO] Letras detectadas: {self.letters}")
-            
             self.model = models.resnet18(weights=None)
             self.model.fc = nn.Linear(self.model.fc.in_features, len(self.letters))
             self.model = self.model.to(device)
-            
             if os.path.exists(MODEL_FILE):
                 self.model.load_state_dict(torch.load(MODEL_FILE, map_location=device))
                 self.model.eval()
                 print("[INFO] Modelo ResNet cargado exitosamente")
             else:
                 print(f"[ERROR] No se encontró el archivo del modelo: {MODEL_FILE}")
-                print("[INFO] Entrena primero el modelo con el script de entrenamiento")
                 self.model = None
-                
         except Exception as e:
             print(f"[ERROR] Error al cargar el modelo: {e}")
             self.model = None
 
     # -------------------------
-    # Predecir letra con ResNet
+    # Predecir letra
     # -------------------------
     def predecir_letra(self):
         if not self.model or not self.letters:
@@ -228,7 +236,30 @@ class KinectHandSystem:
             conf, pred = torch.max(probs.data, 1)
         letra = self.letters[pred.item()] if pred.item() < len(self.letters) else "?"
         self.last_prediction_time = current_time
+
+        # Guardar imagen usada para predicción
+        self.saved_images.append(proc.copy())
         return letra, conf.item()
+
+    # -------------------------
+    # Generar MP3 con ElevenLabs
+    # -------------------------
+    def txt_a_mp3_elevenlabs(self, ruta_txt, ruta_mp3):
+        if not self.client:
+            print("❌ No hay cliente ElevenLabs configurado.")
+            return
+        try:
+            with open(ruta_txt, 'r', encoding='utf-8') as f:
+                texto = f.read()
+            response = self.client.text_to_speech.convert(
+                voice_id="nPczCjzI2devNBz1zQrb",
+                model_id="eleven_multilingual_v2",
+                text=texto
+            )
+            save(response, ruta_mp3)
+            print(f"✅ Voz generada y guardada en {ruta_mp3}")
+        except Exception as e:
+            print(f"⚠️ Error generando MP3: {e}")
 
     # -------------------------
     # Loop principal
@@ -238,92 +269,119 @@ class KinectHandSystem:
             print("Kinect no conectada. Terminando.")
             return
 
-        print("Gestos:")
-        print("- Índice levantado: Dibujar")
-        print("- Mano cerrada + agitado: Borrar")
-        print("- Mano abierta: Guardar/Predecir")
-        print("ESC para salir")
-
         while True:
             frame = self.kinect_rgb_frame()
             if frame is None: break
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(img_rgb)
+            self.feedback_gesto = ""
+            index_point = None
 
             if results.multi_hand_landmarks:
                 hand_landmarks = results.multi_hand_landmarks[0]
                 fingers = self.fingers_up(hand_landmarks)
-                palm_x = int((hand_landmarks.landmark[0].x + hand_landmarks.landmark[9].x)/2 * WIDTH)
-                palm_y = int((hand_landmarks.landmark[0].y + hand_landmarks.landmark[9].y)/2 * HEIGHT)
-                palm = (palm_x, palm_y)
+                index_point = (int(hand_landmarks.landmark[8].x*WIDTH),
+                               int(hand_landmarks.landmark[8].y*HEIGHT))
 
-                if self.mano_cerrada(hand_landmarks):
-                    if self.detectar_agitado(palm):
-                        self.borrar_canvas()
-                    self.estado = "Mano cerrada"
+                # Solo meñique = cambiar color
+                if fingers == [0,0,0,0,1]:
+                    if self.line_color == (0,255,0):
+                        self.line_color = (0,0,255)
+                        self.feedback_gesto = "Color Rojo ✅"
+                    else:
+                        self.line_color = (0,255,0)
+                        self.feedback_gesto = "Color Verde ✅"
+
+                # Pulgar solo = borrar canvas
+                if self.gesto_borrar_ultima_letra(fingers) and sum(fingers)==1:
+                    self.borrar_canvas()
+                    self.estado = "Borrar canvas"
                     self.prev_point = None
-                
-                elif fingers == [0,1,0,0,0]:
-                    self.estado = "Dibujo ON"
-                    x = int(hand_landmarks.landmark[8].x * WIDTH)
-                    y = int(hand_landmarks.landmark[8].y * HEIGHT)
-                    if self.prev_point is not None:
-                        cv2.line(self.canvas, self.prev_point, (x,y), (0,255,0), 4)
-                    self.prev_point = (x,y)
-                
-                elif sum(fingers) == 5:
-                    if self.prev_palm is not None and math.hypot(palm[0]-self.prev_palm[0], palm[1]-self.prev_palm[1])>50:
-                        if self.modo==2: 
-                            self.guardar_dibujo_dataset()
-                        elif self.modo==1 and self.model:
-                            letra, conf = self.predecir_letra()
-                            if letra is not None and conf is not None:
-                                self.predicciones.append(letra)
-                                print(f"[PRED] {letra} ({conf:.2%})")
-                        self.borrar_canvas()
-                    self.prev_point = None
-                    self.estado = "Mano abierta"
-                
+
+                # Pulgar 2s = borrar última letra
+                if self.gesto_borrar_ultima_letra(fingers):
+                    if self.gesto_borrar_letra_start is None:
+                        self.gesto_borrar_letra_start = time.time()
+                    elif time.time()-self.gesto_borrar_letra_start>=GESTURE_HOLD_TIME:
+                        if self.predicciones:
+                            removed=self.predicciones.pop()
+                            print(f"[INFO] Última letra borrada: {removed}")
+                        self.feedback_gesto="Última letra borrada ✅"
+                        self.gesto_borrar_letra_start=None
                 else:
-                    self.estado = "Dibujo OFF"
-                    self.prev_point = None
-                
-                self.prev_palm = palm
-                self.mp_drawing.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+                    self.gesto_borrar_letra_start=None
 
-            combined = cv2.addWeighted(frame,1,self.canvas,1,0)
+                # Pulgar + meñique = predecir
+                if self.gesto_predecir(fingers):
+                    letra, conf = self.predecir_letra()
+                    if letra is not None and conf is not None:
+                        self.predicciones.append(letra)
+                        print(f"[PRED] {letra} ({conf:.2%})")
+                        self.feedback_gesto = f"Predicción: {letra} ✅"
+
+                # Índice + medio = guardar y salir
+                if self.gesto_guardar_predicciones(fingers):
+                    if self.gesto_guardar_predicciones_start is None:
+                        self.gesto_guardar_predicciones_start = time.time()
+                    elif time.time()-self.gesto_guardar_predicciones_start>=GESTURE_HOLD_TIME:
+                        self.guardar_predicciones_txt()
+                        print("[INFO] Programa finalizado tras guardar predicciones.")
+                        cv2.destroyAllWindows()
+                        self.hands.close()
+                        sys.exit(0)
+
+                # Dibujar con índice
+                if fingers==[0,1,0,0,0]:
+                    x,y=index_point
+                    if self.prev_point is not None:
+                        cv2.line(self.canvas,self.prev_point,(x,y),self.line_color,4)
+                    self.prev_point=(x,y)
+                    self.estado="Dibujo ON"
+                else:
+                    self.prev_point=None
+                    self.estado="Dibujo OFF"
+
+            # Botones GUI
+            for b, coords in self.buttons.items():
+                x1,y1,x2,y2,text = coords
+                cv2.rectangle(frame,(x1,y1),(x2,y2),(100,100,100),-1)
+                cv2.putText(frame,text,(x1+5,y1+30),cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,255,255),2)
+                if index_point and x1<=index_point[0]<=x2 and y1<=index_point[1]<=y2:
+                    if self.button_hover_start is None:
+                        self.button_hover_start=time.time()
+                    elif time.time()-self.button_hover_start>=GESTURE_HOLD_TIME:
+                        if b=="borrar":
+                            self.borrar_canvas()
+                        elif b=="guardar":
+                            self.guardar_predicciones_txt()
+                        elif b=="color":
+                            self.line_color = (0,0,255) if self.line_color==(0,255,0) else (0,255,0)
+                        elif b=="dibujar":
+                            self.estado="Dibujo ON"
+                        self.button_hover_start=None
+                else:
+                    self.button_hover_start=None
+
+            # Combinar canvas y frame
+            combined=cv2.addWeighted(frame,1,self.canvas,1,0)
             cv2.putText(combined,f"Modo: {self.modo} - {self.estado}",(10,20),cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,255,255),2)
-            
-            if self.modo == 1:
-                time_remaining = max(0, PREDICTION_COOLDOWN - (time.time() - self.last_prediction_time))
-                cooldown_text = f"Cooldown: {time_remaining:.1f}s"
-                cv2.putText(combined, cooldown_text, (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            
-            if self.modo==2:
-                letra_texto = f"Letra: {self.selected_letter}" if self.selected_letter else "Letra no seleccionada"
-            elif self.modo==1:
-                letra_texto = f"Predicciones: {''.join(self.predicciones[-10:])}"
-            else:
-                letra_texto = self.mensaje_superior
-            cv2.putText(combined, letra_texto, (10,50), cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,255,0),2)
-            cv2.imshow("Kinect Sistema", combined)
+            letra_texto=f"Predicciones: {''.join(self.predicciones[-10:])}"
+            cv2.putText(combined,letra_texto,(10,50),cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,255,0),2)
+            if self.feedback_gesto:
+                cv2.putText(combined,self.feedback_gesto,(10,110),cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,255,255),2)
 
-            key = cv2.waitKey(1)&0xFF
+            cv2.imshow("Kinect Sistema",combined)
+            key=cv2.waitKey(1)&0xFF
             if key==27: break
-            elif key in [ord("1"), ord("2"), ord("3")]:
-                self.modo=int(chr(key))
-                if self.modo==1 and self.model is None:
-                    self.cargar_modelo()
-            elif self.modo==2 and chr(key).lower() in string.ascii_lowercase:
-                self.selected_letter=chr(key).lower()
-                print(f"[INFO] Letra seleccionada: {self.selected_letter}")
 
         self.hands.close()
         cv2.destroyAllWindows()
 
+
 # -----------------------------
-# Ejecutar
+# Main
 # -----------------------------
 if __name__=="__main__":
-    system = KinectHandSystem()
+    ELEVENLABS_API_KEY="sk_a9e5ec86b63fe701e969fb5024daa2f9294360f76af0a506"
+    system=KinectHandSystem(elevenlabs_api_key=ELEVENLABS_API_KEY)
     system.run()
