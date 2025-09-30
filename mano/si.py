@@ -1,4 +1,4 @@
-from machine import Pin, PWM #
+from machine import Pin, PWM 
 import time
 
 # Configuración de pines y rangos máximos
@@ -65,7 +65,7 @@ def reset_all():
 def a():
     reset_all()
     mover_dedo("indice", 1)
-    mover_dedo("medio", 1)
+    mover_dedo_custom("medio", 1, 1800)
     mover_dedo("anular", 1)
     mover_dedo("menique", 1)
     mover_dedo("pulgar2", 1)
