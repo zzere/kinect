@@ -1,4 +1,4 @@
-from machine import Pin, PWM
+from machine import Pin, PWM #
 import time
 
 # Configuración de pines y rangos máximos
@@ -60,6 +60,7 @@ def reset_all():
     time.sleep(0.5)
     mover_dedo("pulgar", 0)
     mover_dedo("pulgar2", 0)
+    time.sleep(0.5)
 
 def a():
     reset_all()
@@ -67,6 +68,7 @@ def a():
     mover_dedo("medio", 1)
     mover_dedo("anular", 1)
     mover_dedo("menique", 1)
+    mover_dedo("pulgar2", 1)
     #ime.sleep(2)
 
 def b():
@@ -86,19 +88,18 @@ def c():
 def d():        
     reset_all()
     mover_dedo_custom("pulgar", 1, 1500)
-    mover_dedo_custom("medio", 1, 2000)
-    mover_dedo_custom("anular", 1, 1500)
+    mover_dedo_custom("medio", 1, 1500)
+    mover_dedo_custom("anular", 1, 1800)
     mover_dedo_custom("menique", 1, 1800)
     mover_dedo_custom("pulgar2", 1, 1000)
 
 def e():
     reset_all()
-    mover_dedo_custom("pulgar", 1, 700)
-    mover_dedo_custom("indice", 1, 700)
-    mover_dedo_custom("medio", 1, 700)
-    mover_dedo_custom("anular", 1, 700)
-    mover_dedo_custom("menique", 1, 700)
-    mover_dedo("pulgar2", 1)
+    mover_dedo("indice", 1)
+    mover_dedo("medio", 1)
+    mover_dedo("anular", 1)
+    mover_dedo_custom("menique", 1, 2300)
+    mover_dedo("pulgar", 1)
 
 def f():
     reset_all()
@@ -106,6 +107,7 @@ def f():
     mover_dedo("anular", 1)
     mover_dedo("menique", 1)
     mover_dedo("pulgar2", 1)
+    time.sleep(0.5)
     mover_dedo("pulgar", 1)
 
 def i():
@@ -121,7 +123,7 @@ def k():
     reset_all()
     mover_dedo("menique", 1)
     mover_dedo("anular", 1)
-    mover_dedo_custom("pulgar2", 1, 1300)
+    mover_dedo("pulgar2", 1)
     time.sleep(0.5)
     mover_dedo("pulgar", 1)
 
@@ -144,7 +146,7 @@ def n():
     mover_dedo("menique", 1)
     mover_dedo("anular", 1)
     time.sleep(0.5)
-    mover_dedo_custom("pulgar", 1, 1200)
+    mover_dedo_custom("pulgar", 1, 1400)
     mover_dedo("indice", 1)
     mover_dedo("medio", 1)
     
@@ -153,7 +155,7 @@ def o():
     mover_dedo_custom("pulgar", 1, 1200)
     mover_dedo_custom("indice", 1, 2000)
     mover_dedo_custom("medio", 1, 2000)
-    mover_dedo_custom("anular", 1, 2000)
+    mover_dedo_custom("anular", 1, 2200)
     mover_dedo_custom("menique", 1, 2000)
     mover_dedo("pulgar2", 1)
 def p():
@@ -176,6 +178,7 @@ def r():
     mover_dedo("menique", 1)
     mover_dedo("anular", 1)
     mover_dedo_custom("pulgar2", 1, 1200)
+    mover_dedo_custom("indice", 1, 600)
     time.sleep(0.5)
     mover_dedo("pulgar", 1)
     mover_dedo_custom("medio", 1, 700)
