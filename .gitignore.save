@@ -1,5 +1,5 @@
 venv
 mano/backup
 mano/dataset
-mano/prueba
+mano/pruebas
 mano/*.pth
