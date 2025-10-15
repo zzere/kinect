@@ -2,6 +2,15 @@ import speech_recognition as sr
 import serial
 import subprocess
 import time
+from gtts import gTTS
+import os
+
+class DecirNombre:
+    def decir(self, texto):
+        tts = gTTS(text=f"Tu nombre es {texto}", lang='es', slow=False)
+        tts.save("nombre.mp3")
+        os.system("mpg123 nombre.mp3")
+        os.remove("nombre.mp3")
 
 class Esp32():
     def __init__(self):
@@ -73,32 +82,43 @@ class NameHandler:
         
 def main():
 
-    #esp = Esp32()
+    esp = Esp32()
     voice = VoiceRecognizer()
     nombre = NameHandler()
     letras = ['g','h','j','s','z']
+    voz = DecirNombre()
     
-    while True:
-        
-        texto = voice.listen_and_recognize()
+    try:
+        while True:
+            canson = input("1 para grabar")
+            
+            if canson == "1":
+                texto = voice.listen_and_recognize()
 
-        if texto == None:
-            continue
-        elif any(letra in letras for letra in texto):
-            print("hay una letra no valida en el nombre")
-        else:
-            nombre.save_name(texto)
-            texto = texto.lower()
-            texto = list(texto)
-            for letra in texto:
-                #esp.enviar_letra(letra)
-                print(letra)
-                time.sleep(4)
+                if texto == None:
+                    continue
+                elif any(letra in letras for letra in texto):
+                    print("hay una letra no valida en el nombre")
+                else:
+                    nombre.save_name(texto)
+                    textoL = texto.lower()
+                    textoL = list(textoL)
+                    for letra in textoL:
+                        esp.enviar_letra(letra)
+                        print(letra)
+                        time.sleep(4)
+                    
+                    voz.decir(texto)
+            else:
+                print("input no valido")
+                break
 
-
-
-
-
+    except KeyboardInterrupt:
+        esp.close()
+        print("programa finalizado")
+    finally:
+        esp.close()
+        voz.decir("caaaaaaaansoooooooooooooooooooooooooooon")
 
 
 if __name__ == "__main__":
