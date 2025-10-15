@@ -3,3 +3,4 @@ mano/backup
 mano/dataset
 mano/prueba
 mano/*.pth
+mano/dataset_tratado

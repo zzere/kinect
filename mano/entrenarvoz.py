@@ -153,17 +153,9 @@ def train_model(dataset_path=DATASET_PATH, epochs=EPOCHS, batch_size=BATCH_SIZE,
                 hidden_size=HIDDEN_SIZE_CLASSIFIER, train_split=TRAIN_SPLIT,
                 criterion_type=CRITERION_TYPE, optimizer_type=OPTIMIZER_TYPE,
                 weight_decay=WEIGHT_DECAY, target_val_acc=TARGET_VAL_ACC, model_path=MODEL_PATH):
-    """
-    Entrena el modelo con las configuraciones proporcionadas.
-    Solo se ejecuta cuando se llama esta función.
-    
-    Args:
-        target_val_acc (float, optional): Precisión de validación deseada (e.g., 0.95).
-            Si se alcanza o supera, detiene el entrenamiento temprano. None = entrena todas las épocas.
-    """
-    print("🚀 Iniciando entrenamiento...")
+    print("Iniciando entrenamiento...")
     if target_val_acc is not None:
-        print(f"🎯 Objetivo de precisión de validación: {target_val_acc:.2%}")
+        print(f"Objetivo de precisión de validación: {target_val_acc:.2%}")
     
     # Cargar dataset
     dataset = LetterAudioDataset(dataset_path, SAMPLE_RATE)
@@ -195,16 +187,16 @@ def train_model(dataset_path=DATASET_PATH, epochs=EPOCHS, batch_size=BATCH_SIZE,
 
         # Verificar early stopping basado en val_acc deseado
         if target_val_acc is not None and val_acc >= target_val_acc:
-            print(f"🎯 Precisión de validación deseada alcanzada: {val_acc:.4f} (>= {target_val_acc:.4f})")
-            print("⏹️  Deteniendo entrenamiento temprano.")
+            print(f"Precisión de validación deseada alcanzada: {val_acc:.4f} (>= {target_val_acc:.4f})")
+            print("Deteniendo entrenamiento temprano.")
             break
 
     # Guardar modelo (incluso si se detuvo temprano)
     save_model(model, dataset.classes, model_path)
     final_val_acc = validate(model, val_loader, criterion)[1]  # Recalcular para confirmar
-    print(f"✅ Entrenamiento completado. Precisión final de validación: {final_val_acc:.4f}")
+    print(f"Entrenamiento completado. Precisión final de validación: {final_val_acc:.4f}")
     if target_val_acc is not None:
-        print(f"📊 ¿Objetivo alcanzado? {'Sí' if final_val_acc >= target_val_acc else 'No'}")
+        print(f"¿Objetivo alcanzado? {'Sí' if final_val_acc >= target_val_acc else 'No'}")
 
 
 # ===============================
@@ -221,7 +213,7 @@ def save_model(model, classes, path=MODEL_PATH):
         }
     }
     torch.save(checkpoint, path)
-    print(f"📦 Modelo guardado en {path}")
+    print(f"Modelo guardado en {path}")
 
 def load_model(path=MODEL_PATH):
     if not os.path.exists(path):
@@ -263,10 +255,10 @@ def predict_letter(audio_path, model_path=MODEL_PATH):
     return classes[predicted.item()]
 
 def predict_microphone(duration=1.0, model_path=MODEL_PATH):
-    print("🎤 Di una letra... grabando...")
+    print("Di una letra... grabando...")
     audio = sd.rec(int(SAMPLE_RATE * duration), samplerate=SAMPLE_RATE, channels=1, dtype='float32')
     sd.wait()
-    print("✅ Grabación terminada")
+    print("Grabación terminada")
 
     waveform = torch.tensor(audio.T, dtype=torch.float32)
     if waveform.size(1) > SAMPLE_RATE:
@@ -297,11 +289,11 @@ if __name__ == "__main__":
         #Desde archivo
         test_audio = "prueba/B/B_1.wav"  # cambia por un audio de prueba
         pred = predict_letter(test_audio)
-        print("🔤 Predicción archivo:", pred)
+        print("Predicción archivo:", pred)
 
         # Desde micrófono (descomenta si quieres probar)
         # pred = predict_microphone(duration=1.0)
-        # print("🔤 Predicción micrófono:", pred)
+        # print("Predicción micrófono:", pred)
     except FileNotFoundError as e:
         print(e)
-        print("💡 Para predecir, entrena el modelo primero: train_model()")
+        print("Para predecir, entrena el modelo primero: train_model()")
