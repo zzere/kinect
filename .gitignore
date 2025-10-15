@@ -4,3 +4,4 @@ mano/dataset
 mano/prueba
 mano/*.pth
 mano/dataset_tratado
+mano/dataset_soloruido
